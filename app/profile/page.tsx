@@ -1,7 +1,8 @@
 "use client";
 
-import { getCurrentUserProfile } from "@/lib/actions/profile";
 import { calculateAge } from "@/lib/helpers/calculate-age";
+import { createClient } from "@/lib/supabase/client";
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -35,6 +36,12 @@ export interface UserPreferences {
   gender_preference: ("male" | "female" | "other")[];
 }
 
+const GENDER_LABELS: Record<UserProfile["gender"], string> = {
+  male: "男性",
+  female: "女性",
+  other: "その他",
+};
+
 export default function ProfilePage() {
 
   // profileは取得したプロフィール情報を保持する。
@@ -52,21 +59,48 @@ export default function ProfilePage() {
       ログイン中のユーザーのプロフィール情報を取得する処理
 
       【処理フロー】
-      1. getCurrentUserProfileでプロフィール情報を取得する。
-      2. 情報があればprofileに設定し、なければエラーメッセージを設定する。
-      3. 取得中にエラーが発生した場合も、エラーメッセージを設定する。
+      1. ブラウザーのSupabaseクライアントからログイン中のユーザーを取得する。
+      2. ユーザーIDに一致するプロフィール情報を取得する。
+      3. 情報があればprofileに設定し、なければエラーメッセージを設定する。
       4. 取得処理が終わったら、読み込み状態を解除する。
     */
 
   useEffect(() => {
     async function loadProfile() {
       try {
-        const profileData = await getCurrentUserProfile();
-        console.log(profileData);
+        // ブラウザーで認証状態とプロフィール情報を取得する。
+        const supabase = createClient();
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError) {
+          throw userError;
+        }
+
+        if (!user) {
+          setError(
+            "ログインが必要です。確認メールの認証後、ログインしてください。"
+          );
+          return;
+        }
+
+        // ログイン中のユーザーIDに一致するプロフィールを取得する。
+        const { data: profileData, error: profileError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profileError) {
+          throw profileError;
+        }
+
         if (profileData) {
           setProfile(profileData);
         } else {
-          setError("プロフィールを読み込めませんでした。");
+          setError("プロフィール情報が見つかりません。");
         }
       } catch (err) {
         console.error("プロフィールの読み込み中にエラーが発生しました:", err);
@@ -80,6 +114,8 @@ export default function ProfilePage() {
   }, []);
 
   // ----------------------------------------------------------------------------------
+
+  const isLoginRequired = error?.startsWith("ログインが必要です。") ?? false;
 
   if (loading) {
     return (
@@ -102,21 +138,45 @@ export default function ProfilePage() {
             <span className="text-4xl">❌</span>
           </div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-            プロフィールが見つかりません
+            {isLoginRequired ? "ログインが必要です" : "プロフィールが見つかりません"}
           </h2>
           <p className="text-gray-600 dark:text-gray-400 mb-6">
             {error || "プロフィールを読み込めませんでした。もう一度お試しください。"}
           </p>
-          <button
-            onClick={() => window.location.reload()}
-            className="bg-gradient-to-r from-pink-500 to-red-500 text-white font-semibold py-3 px-6 rounded-full hover:from-pink-600 hover:to-red-600 transition-all duration-200"
-          >
-            再読み込み
-          </button>
+          {isLoginRequired ? (
+            <Link
+              href="/auth"
+              className="inline-block bg-gradient-to-r from-pink-500 to-red-500 text-white font-semibold py-3 px-6 rounded-full hover:from-pink-600 hover:to-red-600 transition-all duration-200"
+            >
+              ログイン画面へ
+            </Link>
+          ) : (
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-gradient-to-r from-pink-500 to-red-500 text-white font-semibold py-3 px-6 rounded-full hover:from-pink-600 hover:to-red-600 transition-all duration-200"
+            >
+              再読み込み
+            </button>
+          )}
         </div>
       </div>
     );
   }
+
+  // 未登録・不足している希望条件に初期値を補う。
+  const preferences = {
+    age_range: {
+      min: profile.preferences?.age_range?.min ?? 18,
+      max: profile.preferences?.age_range?.max ?? 50,
+    },
+    distance: profile.preferences?.distance ?? 25,
+    gender_preference: profile.preferences?.gender_preference ?? [],
+  };
+  // 希望する性別を日本語表示にまとめる。
+  const genderPreferenceText =
+    preferences.gender_preference
+      .map((gender) => GENDER_LABELS[gender])
+      .join("、") || "指定なし";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 to-red-50 dark:from-gray-900 dark:to-gray-800">
@@ -137,11 +197,20 @@ export default function ProfilePage() {
                 <div className="flex items-center space-x-6 mb-8">
                   <div className="relative">
                     <div className="w-24 h-24 rounded-full overflow-hidden">
-                      <img
-                        src={profile.avatar_url || "/default-avatar.png"}
-                        alt={profile.full_name}
-                        className="w-full h-full object-cover"
-                      />
+                      {profile.avatar_url ? (
+                        <Image
+                          src={profile.avatar_url}
+                          alt={profile.full_name}
+                          className="w-full h-full object-cover"
+                          width={96}
+                          height={96}
+                          unoptimized
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-gray-200 text-xs font-semibold text-gray-500">
+                          No IMAGE
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -207,8 +276,8 @@ export default function ProfilePage() {
                           年齢
                         </label>
                         <p className="text-gray-900 dark:text-white">
-                          {profile.preferences.age_range.min} -{" "}
-                          {profile.preferences.age_range.max}歳
+                          {preferences.age_range.min} -{" "}
+                          {preferences.age_range.max}歳
                         </p>
                       </div>
                       <div>
@@ -216,7 +285,15 @@ export default function ProfilePage() {
                           距離
                         </label>
                         <p className="text-gray-900 dark:text-white">
-                          最大{profile.preferences.distance} km
+                          最大{preferences.distance} km
+                        </p>
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          希望する相手の性別
+                        </label>
+                        <p className="text-gray-900 dark:text-white">
+                          {genderPreferenceText}
                         </p>
                       </div>
                     </div>
