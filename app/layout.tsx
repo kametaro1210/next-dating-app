@@ -1,3 +1,4 @@
+import Navbar from "@/components/Navbar";
 import { AuthProvider } from "@/contexts/auth-context";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
@@ -31,6 +32,7 @@ export default function RootLayout({
       >
         <AuthProvider>
           <div className="h-full flex flex-col">
+            <Navbar />
             {children}
           </div>
         </AuthProvider>
